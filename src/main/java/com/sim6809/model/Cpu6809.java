@@ -257,7 +257,7 @@ public class Cpu6809 {
     private void doCmp(int reg, int v) { int r=reg-v; updateVCSub(reg,v,r); updateNZ8(r); }
     private void doCmp16(int reg, int v) { int r=reg-v; updateNZ16(r); if(reg<v) CC|=1; else CC&=~1; if(((reg^v)&(reg^r))<0) CC|=2; else CC&=~2; }
 
-    // --- CORRECTION SYNTAXE ICI (Parenthèses ajoutées) ---
+    // --- CORRECTION DES PARENTHESES ICI ---
     private void doIncMem(int addr) { int v=bus.read(addr); v=doInc(v); bus.write(addr, v); }
     private void doDecMem(int addr) { int v=bus.read(addr); int r=(v-1)&0xFF; if(r==0) CC|=4; else CC&=~4; if((r&0x80)!=0) CC|=8; else CC&=~8; if(v==0x80) CC|=2; else CC&=~2; bus.write(addr, r); }
     private void doClrMem(int addr) { bus.write(addr, 0); CC|=4; CC&=~0xA; }
@@ -270,7 +270,7 @@ public class Cpu6809 {
     private void doLsrMem(int addr) { int v=bus.read(addr); v=doLsr(v); bus.write(addr, v); }
     private void doRolMem(int addr) { int v=bus.read(addr); v=doRol(v); bus.write(addr, v); }
     private void doRorMem(int addr) { int v=bus.read(addr); v=doRor(v); bus.write(addr, v); }
-    // -----------------------------------------------------
+    // ----------------------------------------
 
     private int doNeg(int v) { int r=0-v; updateVCSub(0,v,r); updateNZ8(r); return r&0xFF; }
     private int doCom(int v) { int r=~v & 0xFF; CC&=~0x0E; CC|=1; updateNZ8(r); return r; }
