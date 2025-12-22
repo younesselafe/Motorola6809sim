@@ -112,7 +112,7 @@ public class MainApp extends Application {
         setupCpuLoop();
         bus.addListener((a,v) -> refreshMemoryView());
 
-        Scene scene = new Scene(root, 1200, 750);
+        Scene scene = new Scene(root, 1200, 720);
         primaryStage.setTitle("Motorola 6809 Studio - Ultimate v32 (Stacks S & U)");
         primaryStage.setScene(scene);
         primaryStage.show();
@@ -282,9 +282,25 @@ public class MainApp extends Application {
         btnHalt.setStyle("-fx-base: #D32F2F; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 10px;"); 
         btnHalt.setOnAction(e -> cpu.lineHALT = btnHalt.isSelected());
         
-        Button btnIrq = new Button("IRQ"); btnIrq.setOnAction(e->cpu.lineIRQ=true);
-        Button btnFirq = new Button("FIRQ"); btnFirq.setOnAction(e->cpu.lineFIRQ=true);
-        Button btnNmi = new Button("NMI"); btnNmi.setOnAction(e->cpu.lineNMI=true);
+        // --- MODIFICATION ICI : Connexion réelle aux lignes du CPU ---
+        Button btnIrq = new Button("IRQ"); 
+        btnIrq.setOnAction(e -> { 
+            cpu.lineIRQ = true; 
+            log(">> SIGNAL IRQ ENVOYÉ"); 
+        });
+
+        Button btnFirq = new Button("FIRQ"); 
+        btnFirq.setOnAction(e -> { 
+            cpu.lineFIRQ = true; 
+            log(">> SIGNAL FIRQ ENVOYÉ"); 
+        });
+
+        Button btnNmi = new Button("NMI"); 
+        btnNmi.setOnAction(e -> { 
+            cpu.lineNMI = true; 
+            log(">> SIGNAL NMI ENVOYÉ"); 
+        });
+        // -------------------------------------------------------------
         
         String style = "-fx-font-size: 10px; -fx-font-weight: bold; -fx-padding: 3 8 3 8;";
         btnIrq.setStyle(style + "-fx-base: #FF9800;"); 
@@ -451,7 +467,104 @@ public class MainApp extends Application {
     private Label header(String txt) { Label l = new Label(txt); l.setTextFill(Color.web("#e0e0e0")); l.setFont(Font.font("System", FontWeight.BOLD, 12)); return l; }
     private String hex(int v) { return String.format("%02X", v); }
     private String hex16(int v) { return String.format("%04X", v); }
-    private String getDefaultProgram() { return "ORG $8000\nSTART: CLRA\nADDA #$01\nSTA $12\nJMP START"; }
+    private String getDefaultProgram() { return """
+        ORG $8000       ; Début du programme
+
+        ; --- INIT VECTEURS (IMPORTANT POUR IRQ/FIRQ/NMI) ---
+        LDX #$9000
+        STX $FFFC       ; NMI Vector -> $9000
+        LDX #$9010
+        STX $FFF6       ; FIRQ Vector -> $9010
+        LDX #$9020
+        STX $FFF8       ; IRQ Vector -> $9020
+
+        ; --- INIT ---
+        INIT:
+            LDS #$7FFF  ; Stack S
+            LDU #$6FFF  ; Stack U
+            ; TFR A,DP  <-- SUPPRIMÉ POUR LA CLARTÉ DU TEST (DP reste à $00)
+            
+            LDA #$AA
+            LDB #$55
+            EXG A,B     ; A=$55, B=$AA
+            STD $1000   ; Stocke D ($55AA) en $1000
+            
+            LDX #$1234
+            LDY #$5678
+            TFR X,D     ; D = $1234 (A=$12, B=$34)
+
+        ; --- ARITHMETIQUE ---
+        MATH16:
+            LDD #$1000
+            ADDD #$0234 ; D = $1234
+            SUBD #$0034 ; D = $1200
+            
+            LDA #$10
+            LDB #$10
+            MUL         ; D = $10 * $10 = $0100 (256)
+
+        ; --- INDEXATION ---
+        INDEX:
+            LDX #$2000
+            LDA #$42
+            STA ,X      ; Indexé simple
+            INCA
+            STA 1,X     ; Indexé offset 8 bits
+            LDY #$0005
+            STA 2,Y     ; Offset sur Y
+
+        ; --- PILE ---
+        STACK:
+            LDA #$EE
+            LDB #$FF
+            ANDCC #$AF  ; DEMASQUER I et F (Autoriser Interruptions)
+            PSHS D,CC   ; Empile A, B et CC sur S
+            CLRA
+            CLRB
+            PULS CC,D   ; Dépile -> A=$EE, B=$FF
+            BSR SOUS_PROG
+            BRA LOGIC
+
+        SOUS_PROG:
+            LDA #$01
+            RTS
+
+        ; --- LOGIQUE ---
+        LOGIC:
+            LDA #$0F
+            ORA #$F0
+            ANDA #$AA
+            EORA #$FF
+            LDB #$01
+            ASLB
+            ASLB
+            RORB
+            LDA #$09
+            ADDA #$01
+            DAA
+
+        ; --- BOUCLE FINALE ---
+        FIN:
+            INC $00     ; Compteur mémoire (regardez VARS $00)
+            LDX $0000   ; Charge le compteur pour voir les flags bouger
+            BRA FIN
+
+        ; --- HANDLERS D'INTERRUPTION ---
+        ORG $9000
+        NMI_HANDLER:
+            INC $01     ; Compteur NMI ($01)
+            RTI
+
+        ORG $9010
+        FIRQ_HANDLER:
+            INC $02     ; Compteur FIRQ ($02)
+            RTI
+
+        ORG $9020
+        IRQ_HANDLER:
+            INC $03     ; Compteur IRQ ($03)
+            RTI
+        """; }
 
     public static void main(String[] args) { launch(args); }
 }
