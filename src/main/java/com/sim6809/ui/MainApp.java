@@ -468,102 +468,125 @@ public class MainApp extends Application {
     private String hex(int v) { return String.format("%02X", v); }
     private String hex16(int v) { return String.format("%04X", v); }
     private String getDefaultProgram() { return """
-        ORG $8000       ; Début du programme
-
-        ; --- INIT VECTEURS (IMPORTANT POUR IRQ/FIRQ/NMI) ---
+        ORG $8000 ; Le programme commence en $8000
+        ; ==========================================================
+        ; 1. INIT VECTEURS (OBLIGATOIRE POUR IRQ/FIRQ/NMI)
+        ; On écrit les adresses des gestionnaires dans les vecteurs
+        ; ==========================================================
+        INIT_VECTORS:
         LDX #$9000
-        STX $FFFC       ; NMI Vector -> $9000
+        STX $FFFC ; NMI Vector -> $9000
         LDX #$9010
         STX $FFF6       ; FIRQ Vector -> $9010
+
         LDX #$9020
         STX $FFF8       ; IRQ Vector -> $9020
 
-        ; --- INIT ---
+
+        ; ==========================================================
+        ; 2. TEST MODES D'ADRESSAGE
+        ; ==========================================================
         INIT:
-            LDS #$7FFF  ; Stack S
-            LDU #$6FFF  ; Stack U
-            ; TFR A,DP  <-- SUPPRIMÉ POUR LA CLARTÉ DU TEST (DP reste à $00)
-            
-            LDA #$AA
-            LDB #$55
-            EXG A,B     ; A=$55, B=$AA
-            STD $1000   ; Stocke D ($55AA) en $1000
-            
-            LDX #$1234
-            LDY #$5678
-            TFR X,D     ; D = $1234 (A=$12, B=$34)
+        LDS #$7FFF ; Init Pile (Toujours utile)
+        ; MODE INHÉRENT (1 octet, pas d'opérande) 
+        ; MODE DIRECT (Page Zéro, Rapide)
+        TEST_INHERENT et TEST_DIRECT: :
+        LDA #$FF ; Setup A = FF direct
+        STA $10 ; Direct: Ecrit en $0010 (VARS)
+        INCA ; Inhérent: A -> 00
+        LDB #$FF
+        STB $20 ; Direct: Ecrit en $0020 (VARS)
+        MUL ; Inhérent: A*B -> D
 
-        ; --- ARITHMETIQUE ---
-        MATH16:
-            LDD #$1000
-            ADDD #$0234 ; D = $1234
-            SUBD #$0034 ; D = $1200
-            
-            LDA #$10
-            LDB #$10
-            MUL         ; D = $10 * $10 = $0100 (256)
+        ; --- C. MODE ÉTENDU (Adresse 16 bits) ---
+        TEST_EXTENDED:
+        LDA #$CC
+        STA $1000 ; Étendu: Ecrit en $1000 (CONTEXTE)
+        LDB $1000 ; Étendu: Relit
+        ; --- D. MODE INDEXÉ (Calculé : Base + Offset) ---
+        TEST_INDEXED:
+        LDX #$0020
+        LDA #$DD
+        STA ,X ; Indexé (Offset 0) -> $0020
+        LDB #$EE
+        STB 5,X         ; Indexé (Offset 5) -> $0025
 
-        ; --- INDEXATION ---
-        INDEX:
-            LDX #$2000
-            LDA #$42
-            STA ,X      ; Indexé simple
-            INCA
-            STA 1,X     ; Indexé offset 8 bits
-            LDY #$0005
-            STA 2,Y     ; Offset sur Y
-
-        ; --- PILE ---
+        ; ==========================================================
+        ; 3. TEST PILES (STACK)
+        ; ==========================================================
         STACK:
-            LDA #$EE
-            LDB #$FF
-            ANDCC #$AF  ; DEMASQUER I et F (Autoriser Interruptions)
-            PSHS D,CC   ; Empile A, B et CC sur S
-            CLRA
-            CLRB
-            PULS CC,D   ; Dépile -> A=$EE, B=$FF
-            BSR SOUS_PROG
-            BRA LOGIC
+        LDA #$EE
+        LDB #$FF
+        ; DÉMASQUAGE DES INTERRUPTIONS
+        ANDCC #$AF      ; I=0, F=0 (Autorise IRQ et FIRQ)
+
+        ; EMPILEMENT (PUSH)
+        PSHS D,CC       ; Sauve A, B et CC sur la pile S
+                        ; Regardez la pile descendre !
+
+        ; MODIFICATION
+        CLRA
+        CLRB
+
+        ; DÉPILEMENT (PULL)
+        PULS CC,D       ; Restaure A, B et CC
+
+        BSR SOUS_PROG   ; Saut vers sous-programme
+        BRA LOGIC       ; Saut vers la suite
+
 
         SOUS_PROG:
-            LDA #$01
-            RTS
-
-        ; --- LOGIQUE ---
+        LDA #$01
+        RTS ; Retour de sous-programme
+        ; ==========================================================
+        ; 4. TEST FLAGS (LOGIQUE)
+        ; ==========================================================
         LOGIC:
-            LDA #$0F
-            ORA #$F0
-            ANDA #$AA
-            EORA #$FF
-            LDB #$01
-            ASLB
-            ASLB
-            RORB
-            LDA #$09
-            ADDA #$01
-            DAA
+        CLRA
+        CLRB
+        ANDCC #$00 ; Reset tous les flags
+        ;TEST_CARRY:
+        LDA #$FF ; Charge 255 (Max 8 bits)
+        ADDA #$01 ; Ajoute 1 -> Résultat théorique 256
+        ; OBSERVEZ CC : Le flag C doit s'allumer (Bit 0)
 
-        ; --- BOUCLE FINALE ---
+        ;TEST_OVERFLOW:
+        LDB #$7F ; Charge +127 (Max positif signé)
+        ADDB #$01 ; Ajoute 1 -> Résultat $80 (-128 en signé)
+        ; Le flag V doit s'allumer (Bit 1)
+
+        ; ----------------------------------------------------------
+        TEST_HALF:
+        LDA #$09 ; Charge 9
+        ADDA #$07 ; Ajoute 7 (9+7=16, soit $10 en hex)
+
+
+        ; ==========================================================
+        ; 5. BOUCLE FINALE
+        ; ==========================================================
         FIN:
-            INC $00     ; Compteur mémoire (regardez VARS $00)
-            LDX $0000   ; Charge le compteur pour voir les flags bouger
-            BRA FIN
-
-        ; --- HANDLERS D'INTERRUPTION ---
+        INC $00 ; Compteur mémoire (VARS $00)
+        LDX $0000 ; Charge pour voir les flags bouger
+        BRA FIN ; Boucle infinie
+        ; ==========================================================
+        ; 6. GESTIONNAIRES (Pour que les boutons fonctionnent)
+        ; ==========================================================
         ORG $9000
         NMI_HANDLER:
-            INC $01     ; Compteur NMI ($01)
-            RTI
-
+        LDB #$12
+        STB $04 ; Marqueur NMI en $01
+        RTI
         ORG $9010
         FIRQ_HANDLER:
-            INC $02     ; Compteur FIRQ ($02)
-            RTI
-
+        LDB #$22
+        STB $02 ; Marqueur FIRQ en $02
+        RTI
         ORG $9020
         IRQ_HANDLER:
-            INC $03     ; Compteur IRQ ($03)
-            RTI
+        LDB #$33
+        STB $03 ; Marqueur IRQ en $03
+        RTI
+
         """; }
 
     public static void main(String[] args) { launch(args); }
